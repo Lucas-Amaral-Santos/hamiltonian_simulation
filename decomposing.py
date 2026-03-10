@@ -4,18 +4,10 @@ from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.quantum_info import Statevector
 
 
-# =========================================================
-# DADOS DO SEU EXEMPLO ATUAL: n=2, d=2
-# =========================================================
 
 n = 2
 d = 2
 
-# Grafo:
-# 0 -> [1,3]
-# 1 -> [0,2]
-# 2 -> [1,3]
-# 3 -> [0,2]
 neighbors = {
     0: [1, 3],
     1: [0, 2],
@@ -35,9 +27,6 @@ def f_y_classical(H, x, i):
     return neighbors[x][i]
 
 
-# =========================================================
-# HELPERS DE CIRCUITO
-# =========================================================
 
 def apply_open_pattern(qc, reg, value):
     """Converte controle em |value> para controle em todos-1."""
@@ -51,21 +40,18 @@ def undo_open_pattern(qc, reg, value):
 
 
 def controlled_xor_const(qc, controls, target_reg, value):
-    """Faz target ^= value controlado por controls."""
     for b, q in enumerate(target_reg):
         if ((value >> b) & 1) == 1:
             qc.mcx(controls, q)
 
 
 def append_eq_const_flag(qc, reg, value, flag):
-    """flag ^= 1 se reg == value"""
     apply_open_pattern(qc, reg, value)
     qc.mcx(list(reg), flag)
     undo_open_pattern(qc, reg, value)
 
 
 def append_eq_regs_flag(qc, reg_a, reg_b, flag):
-    """flag ^= 1 se reg_a == reg_b"""
     nbits = len(reg_a)
     assert len(reg_b) == nbits
     for v in range(2**nbits):
@@ -77,7 +63,6 @@ def append_eq_regs_flag(qc, reg_a, reg_b, flag):
 
 
 def append_lt_regs_flag(qc, reg_a, reg_b, flag):
-    """flag ^= 1 se a < b"""
     nbits = len(reg_a)
     assert len(reg_b) == nbits
     for a in range(2**nbits):
@@ -91,22 +76,19 @@ def append_lt_regs_flag(qc, reg_a, reg_b, flag):
 
 
 def append_copy_reg_if_flag(qc, flag, src_reg, dst_reg):
-    """Se flag=1, faz dst ^= src."""
     assert len(src_reg) == len(dst_reg)
     for s, d in zip(src_reg, dst_reg):
         qc.cx(s, d)
-        qc.ccx(flag, d, d)  # noop lógico, evita lint em alguns ambientes
+        qc.ccx(flag, d, d) 
 
 
 def append_cnot_reg_if_flag(qc, flag, src_reg, dst_reg):
-    """Se flag=1, faz dst ^= src."""
     assert len(src_reg) == len(dst_reg)
     for s, d in zip(src_reg, dst_reg):
         qc.ccx(flag, s, d)
 
 
 def append_xor_const_if_flag(qc, flag, dst_reg, value):
-    """Se flag=1, faz dst ^= value."""
     for b, q in enumerate(dst_reg):
         if ((value >> b) & 1) == 1:
             qc.cx(flag, q)
@@ -116,16 +98,11 @@ def append_swap_1bit_if_flag(qc, flag, q1, q2):
     qc.cswap(flag, q1, q2)
 
 
-# =========================================================
-# ORÁCULO Of REVERSÍVEL PARA O EXEMPLO PEQUENO
-# =========================================================
 
 def append_Of_from_neighbors(qc, reg_x, reg_i, reg_y, neighbors):
     """
     Implementa:
         |x>|i>|0> -> |x>|i>|f_y(x,i)>
-    por escrita reversível.
-    Funciona bem para exemplos pequenos.
     """
     n_x = len(reg_x)
     n_i = len(reg_i)
@@ -147,10 +124,6 @@ def append_Of_from_neighbors(qc, reg_x, reg_i, reg_y, neighbors):
             undo_open_pattern(qc, reg_x, x)
 
 
-# =========================================================
-# CIRCUITO DO BERRY PARA O SEU CASO n=2, d=2
-# Aqui z_n = 0, então ν = x_canônico
-# =========================================================
 
 def append_berry_color_circuit_n2d2(
     qc,
@@ -159,29 +132,7 @@ def append_berry_color_circuit_n2d2(
     reg_ican, reg_jcan, reg_nu, reg_valid,
     aux
 ):
-    """
-    Implementa no circuito:
-      yi = f(x,i)
-      yj = f(yi,j)
-      reciprocidade yj == x
-      casos do Berry
-      cor canônica (i_can, j_can, nu), com nu calculado pelo circuito
 
-    Para n=2, z_n=0, então:
-      case 2: nu = x
-      case 3: nu = yi
-      diagonal: nu = 0
-    """
-
-    # aux layout
-    # 0 eq_yjx
-    # 1 lt_x_yi
-    # 2 lt_yi_x
-    # 3 eq_yi_x
-    # 4 eq_i_j
-    # 5 case2
-    # 6 case3
-    # 7 diag
     eq_yjx  = aux[0]
     lt_x_yi = aux[1]
     lt_yi_x = aux[2]
@@ -191,81 +142,75 @@ def append_berry_color_circuit_n2d2(
     case3   = aux[6]
     diag    = aux[7]
 
-    # 1) yi = f(x,i)
+
     append_Of_from_neighbors(qc, reg_x, reg_i, reg_yi, neighbors)
 
-    # 2) yj = f(yi,j)
+
     append_Of_from_neighbors(qc, reg_yi, reg_j, reg_yj, neighbors)
 
-    # 3) flags básicos
-    append_eq_regs_flag(qc, reg_yj, reg_x, eq_yjx)      # yj == x
-    append_lt_regs_flag(qc, reg_x, reg_yi, lt_x_yi)     # x < yi
-    append_lt_regs_flag(qc, reg_yi, reg_x, lt_yi_x)     # yi < x
-    append_eq_regs_flag(qc, reg_yi, reg_x, eq_yi_x)     # yi == x
-    append_eq_regs_flag(qc, reg_i, reg_j, eq_i_j)       # i == j
 
-    # 4) casos do Berry
-    # case2: yi > x  and yj == x
+    append_eq_regs_flag(qc, reg_yj, reg_x, eq_yjx)     
+    append_lt_regs_flag(qc, reg_x, reg_yi, lt_x_yi)    
+    append_lt_regs_flag(qc, reg_yi, reg_x, lt_yi_x)    
+    append_eq_regs_flag(qc, reg_yi, reg_x, eq_yi_x)    
+    append_eq_regs_flag(qc, reg_i, reg_j, eq_i_j)      
+
+
+
     qc.ccx(eq_yjx, lt_x_yi, case2)
 
-    # case3: yi < x  and yj == x
+
     qc.ccx(eq_yjx, lt_yi_x, case3)
 
-    # diag: yi == x and i == j
+
     qc.ccx(eq_yi_x, eq_i_j, diag)
 
-    # 5) valid = diag OR case2 OR case3
+
     qc.cx(diag, reg_valid[0])
     qc.cx(case2, reg_valid[0])
     qc.cx(case3, reg_valid[0])
 
-    # 6) escreve (i_can, j_can)
-    # diag e case2: (i,j)
+
+
     qc.ccx(diag,  reg_i[0], reg_ican[0])
     qc.ccx(diag,  reg_j[0], reg_jcan[0])
 
     qc.ccx(case2, reg_i[0], reg_ican[0])
     qc.ccx(case2, reg_j[0], reg_jcan[0])
 
-    # case3: (j,i)
+
     qc.ccx(case3, reg_j[0], reg_ican[0])
     qc.ccx(case3, reg_i[0], reg_jcan[0])
 
-    # 7) escreve nu
-    # para n=2, z_n=0 -> nu = x no caso 2, nu = yi no caso 3, nu = 0 na diagonal
+
+
     append_cnot_reg_if_flag(qc, case2, reg_x,  reg_nu)
     append_cnot_reg_if_flag(qc, case3, reg_yi, reg_nu)
 
 
-# =========================================================
-# REFERÊNCIA CLÁSSICA EXATA DO MESMO CASO
-# =========================================================
 
 def berry_color_classical_n2d2(H, x, i, j):
     yi = f_y_classical(H, x, i)
     yj = f_y_classical(H, yi, j)
 
-    # diagonal
+
     if yi == x and i == j:
         return (i, j, 0, 1, yi, yj)
 
-    # case 2
+
     if yi > x and yj == x:
-        # z_n = 0 -> nu = x
+    
         return (i, j, x, 1, yi, yj)
 
-    # case 3
+
     if yi < x and yj == x:
-        # cor canônica orientada pelo menor vértice yi
-        # z_n = 0 -> nu = yi
+    
+    
         return (j, i, yi, 1, yi, yj)
 
     return (0, 0, 0, 0, yi, yj)
 
 
-# =========================================================
-# TESTE
-# =========================================================
 
 def test_berry_color_quantum_n2d2(H, x_val, i_val, j_val):
     reg_x     = QuantumRegister(2, 'x')
@@ -292,7 +237,7 @@ def test_berry_color_quantum_n2d2(H, x_val, i_val, j_val):
         c_yi, c_yj, c_ican, c_jcan, c_nu, c_valid
     )
 
-    # prepara |x,i,j>
+
     for k in range(2):
         if ((x_val >> k) & 1) == 1:
             qc.x(reg_x[k])
@@ -363,9 +308,6 @@ def run_all_tests_n2d2(H):
                 test_berry_color_quantum_n2d2(H, x, i, j)
 
 
-# =========================================================
-# EXECUÇÃO
-# =========================================================
 
 if __name__ == "__main__":
     run_all_tests_n2d2(H)
